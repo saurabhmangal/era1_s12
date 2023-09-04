@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, Dataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import pytorch_lightning as pl
+import os
 
 # +
 import numpy as np
@@ -40,7 +41,7 @@ class CIFAR10Dataset(Dataset):
         return image, label
 
 class CIFAR10DataModule(pl.LightningDataModule):
-    def __init__(self, batch_size: int = 64):
+    def __init__(self, batch_size: int = 512):
         super().__init__()
         self.batch_size = batch_size
         self.means = (0.49139968, 0.48215827 ,0.44653124)
@@ -79,7 +80,7 @@ class CIFAR10DataModule(pl.LightningDataModule):
 
 # -
 
-def learning_r_finder(m, optimizer, criterion, device, train_loader, n_iters=200, end_lr=10):
+def learning_lr_finder(m, optimizer, criterion, device, train_loader, n_iters=200, end_lr=10):
     lr_finder = LRFinder(m, optimizer, criterion, device=device)
     lr_finder.range_test(train_loader, end_lr=end_lr, num_iter=n_iters, step_mode="exp")
     fig = lr_finder.plot()  # to inspect the loss-learning rate graph
@@ -87,21 +88,6 @@ def learning_r_finder(m, optimizer, criterion, device, train_loader, n_iters=200
 
 
 # +
-def OneCycleLR_policy(optimizer, train_loader, EPOCHS, peak_value=5.0, div_factor=100, final_div_factor=100,max_lr=1.59E-03):
-    scheduler = OneCycleLR(
-        optimizer,
-        max_lr=max_lr,
-        steps_per_epoch=len(train_loader),
-        epochs=EPOCHS,
-        pct_start=peak_value/EPOCHS,
-        div_factor=div_factor,
-        three_phase=False,
-        final_div_factor=final_div_factor,
-        anneal_strategy='linear',
-    )
-    return scheduler
-
-
 def get_misclassified_data(model, device, test_loader):
     """
     Function to run the model on test set and return misclassified images
@@ -169,6 +155,34 @@ def display_mis_images(misclassified_data, n_images,classes):
 
 
 
+def save_mis_images(misclassified_data, n_images,classes, path):
+    os.system("mkdir "+path)
+    
+    random_images = range(0, len(misclassified_data))
+    random_selects = random.sample(random_images, n_images)
+    plt.clf()
+    fig_miss_class = plt.figure(figsize=(10, 10))
+    
+    count = 0
+    for i in random_selects:
+        # Use the image tensor for plotting
+        
+#         img = misclassified_data[i][0].cpu()
+#         img = inv_normalize(img)
+#         rgb_img = np.transpose(img, (1, 2, 0))
+#         rgb_img = rgb_img.numpy()
+        
+        plt.imshow(misclassified_data[i][0].cpu().numpy().squeeze().transpose(1, 2, 0))
+        # Use the label or classification data for the title
+#         plt.imshow(rgb_img)
+        plt.title(r"Correct: " + classes[misclassified_data[i][1].item()] + '\n' + 'Output: ' + classes[misclassified_data[i][2].item()])
+        plt.xticks([])
+        plt.yticks([])
+        plt.savefig(path+"/"+str(count)+".jpg")
+        plt.close()
+        count += 1
+
+
 # -------------------- GradCam --------------------
 def display_gradcam_output(data: list,
                            classes,
@@ -220,3 +234,5 @@ def display_gradcam_output(data: list,
         plt.title(r"Correct: " + classes[data[i][1].item()] + '\n' + 'Output: ' + classes[data[i][2].item()])
         plt.xticks([])
         plt.yticks([])
+        
+    return fig

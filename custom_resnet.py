@@ -13,20 +13,22 @@ from utils import CIFAR10Dataset, CIFAR10DataModule
 # +
 class ResNetLightningModel(pl.LightningModule):
     def __init__(self):
+        
         super(ResNetLightningModel, self).__init__()
         
         self.max_lr = 1.59E-03
-        data_module = CIFAR10DataModule()      
-        self.train_loader_len = 782 #len(data_module.train_loader())
-        self.EPOCHS = 20 #EPOCHS
+        data_module = CIFAR10DataModule()    
+        data_module.setup('fit')
+        self.train_loader_len = len(data_module.train_loader()) #2*782 #
+        self.EPOCHS = 24 #EPOCHS
         self.peak_value = 5.0  #peak_value
         self.div_factor = 100 #div_factor
         self.final_div_factor = 100 #final_div_factor
-                
-        self.train_acc = Accuracy(task="multiclass", num_classes=10)
-        self.valid_acc = Accuracy(task="multiclass", num_classes=10)
         self.validation_step_outputs = []
+        self.training_step_outputs = []
 
+        
+        
         # PrepLayer
         self.convblock1 = nn.Sequential(
             nn.Conv2d(in_channels=3, out_channels=64, kernel_size=(3, 3), padding=1, stride=1),
@@ -107,34 +109,50 @@ class ResNetLightningModel(pl.LightningModule):
         return x
     
     def training_step(self, batch, batch_idx):
-        inputs, labels = batch
-        outputs = self(inputs)
+        train_inputs, train_labels = batch
+        train_preds = self.forward(train_inputs)
 
-        loss = nn.CrossEntropyLoss()(outputs, labels)
-        acc = self.train_acc(torch.argmax(outputs, dim=1), labels)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, logger=True)
-        self.log('train_acc', acc, on_step=True, on_epoch=True, logger=True)
+        train_loss = nn.CrossEntropyLoss()(train_preds, train_labels)
         
-            # Log learning rate
+                
+        train_acc  = (torch.argmax(train_preds, dim=1) == train_labels).float().mean()
+        self.log('train_loss', train_loss, on_step=True, on_epoch=True, logger=True,prog_bar=True)
+        self.log('train_acc', train_acc, on_step=True, on_epoch=True, logger=True)
+        self.training_step_outputs.append(train_acc)
+
+        # Log learning rate
         lr = self.trainer.optimizers[0].param_groups[0]['lr']
-        print (lr)
-        self.log('lr', lr, on_step=True, on_epoch=True, logger=True)
-        return loss
+        self.log('lr', lr, on_step=True, on_epoch=True, logger=True,prog_bar=True)
+
+        return train_loss
+    
+    
+    def on_train_epoch_end(self):
+        # do something with all training_step outputs, for example:
+        train_epoch_mean = torch.stack(self.training_step_outputs).mean()
+        self.log("training_acc_epoch_mean", train_epoch_mean, on_step=False, on_epoch=True, logger=True,prog_bar=True)
+        print(f"\nEpoch: {self.current_epoch}"," Training Acc Epoch Mean:", train_epoch_mean.item())
+        print ("*"*50)
+        self.training_step_outputs.clear()
+        
+        (f"Current Epoch: {self.current_epoch}")
     
     def validation_step(self, batch, batch_idx):
-        inputs, labels = batch
-        outputs = self(inputs)
-        loss = nn.CrossEntropyLoss()(outputs, labels)
-        acc = self.valid_acc(outputs.argmax(dim=1), labels)
-        self.log('val_loss_step', loss, on_step=True, on_epoch=False, logger=True)
-        self.log('val_acc_step', acc, on_step=True, on_epoch=False, logger=True)
-        self.validation_step_outputs.append(acc)
-        return acc
+        val_inputs, val_labels = batch
+        val_preds = self.forward(val_inputs)
+        
+        val_loss  = nn.CrossEntropyLoss()(val_preds, val_labels)
+        val_acc   = (torch.argmax(val_preds, dim=1) == val_labels).float().mean()
+        self.log('val_loss', val_loss, on_step=True, on_epoch=False, logger=True,prog_bar=True)
+        self.log('val_acc', val_acc, on_step=True, on_epoch=False, logger=True)
+        self.validation_step_outputs.append(val_acc)
+        return val_acc
 
     def on_validation_epoch_end(self):
         all_acc = torch.stack(self.validation_step_outputs)
         avg_acc = all_acc.mean()
-        self.log('val_acc', avg_acc, on_epoch=True, logger=True)
+        self.log('val_acc_epoch_mean', avg_acc, on_epoch=True, logger=True,prog_bar=True)
+        print (f"\nEpoch: {self.current_epoch}"," Validation Acc Epoch Mean:",avg_acc.item()),
         self.validation_step_outputs.clear()     
         
 
@@ -156,9 +174,7 @@ class ResNetLightningModel(pl.LightningModule):
                                     three_phase=False,
                                     final_div_factor=self.final_div_factor,
                                     anneal_strategy='linear'),
-            'interval': 'step'
+            'interval': 'step',
+            'frequency':1
         }
         return [optimizer], [scheduler]
-# -
-
-
